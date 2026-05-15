@@ -43,7 +43,10 @@ from wordcloud import WordCloud
 @st.cache_resource
 def load_spanish_nlp():
     """Load Spanish NLP tools used for tokenization and lemmatization."""
-    return spacy.load("es_core_news_sm", disable=["parser", "ner"])
+    try:
+        return spacy.load("es_core_news_sm", disable=["parser", "ner"])
+    except OSError:
+        return spacy.blank("es")
 
 
 def preprocess_text(text: str, language: str = "spanish") -> List[str]:
@@ -58,11 +61,11 @@ def preprocess_text(text: str, language: str = "spanish") -> List[str]:
     """
     stop_words = set(stopwords.words(language))
     doc = load_spanish_nlp()(text)
-    filtered = [
-        token.lemma_.lower()
-        for token in doc
-        if token.is_alpha and token.lemma_.lower() not in stop_words
-    ]
+    filtered = []
+    for token in doc:
+        lemma = token.lemma_.lower() if token.lemma_ else token.text.lower()
+        if token.is_alpha and lemma not in stop_words:
+            filtered.append(lemma)
     return filtered
 
 
