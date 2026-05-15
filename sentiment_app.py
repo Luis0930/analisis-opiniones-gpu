@@ -70,6 +70,12 @@ def top_frequent_words(tokens: List[str], n: int = 10) -> List[Tuple[str, int]]:
     return counter.most_common(n)
 
 
+@st.cache_resource
+def load_sentiment_pipeline():
+    """Load a Spanish sentiment model once per Streamlit session."""
+    return pipeline("sentiment-analysis", model="pysentimiento/robertuito-sentiment-analysis")
+
+
 def classify_sentiments(texts: List[str]) -> List[str]:
     """Classify sentiments using a pretrained sentiment-analysis pipeline.
 
@@ -79,11 +85,17 @@ def classify_sentiments(texts: List[str]) -> List[str]:
     Returns:
         List of sentiment labels (POSITIVE/NEGATIVE/NEUTRAL).
     """
-    # Load transformer pipeline once. Use a small model for efficiency.
-    sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
+    sentiment_pipeline = load_sentiment_pipeline()
     results = sentiment_pipeline(texts)
-    labels = [res["label"] for res in results]
-    # Convert POSITIVE/NEGATIVE to bilingual labels if needed
+    label_map = {
+        "POS": "Positivo",
+        "NEG": "Negativo",
+        "NEU": "Neutral",
+        "POSITIVE": "Positivo",
+        "NEGATIVE": "Negativo",
+        "NEUTRAL": "Neutral",
+    }
+    labels = [label_map.get(res["label"], res["label"]) for res in results]
     return labels
 
 
@@ -155,8 +167,10 @@ def main():
             df_filtered = df
         # Classification using LLM
         st.subheader("Clasificación de sentimientos utilizando modelo de lenguaje")
+        st.caption("Modelo usado: pysentimiento/robertuito-sentiment-analysis, entrenado para sentimiento en español.")
         # To avoid long runtime, process only first 100 comments; in this case we have 30
         labels = classify_sentiments(df_filtered["opinion"].tolist())
+        df_filtered = df_filtered.copy()
         df_filtered["sentimiento_modelo"] = labels
         st.dataframe(df_filtered[["opinion", "clase", "sentimiento_modelo"]])
         display_sentiment_distribution(labels)
