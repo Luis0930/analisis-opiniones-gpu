@@ -33,11 +33,17 @@ from typing import List, Tuple
 import matplotlib.pyplot as plt
 import nltk
 import pandas as pd
+import spacy
 import streamlit as st
 from nltk.corpus import stopwords
-from nltk.stem import WordNetLemmatizer
 from transformers import pipeline
 from wordcloud import WordCloud
+
+
+@st.cache_resource
+def load_spanish_nlp():
+    """Load Spanish NLP tools used for tokenization and lemmatization."""
+    return spacy.load("es_core_news_sm", disable=["parser", "ner"])
 
 
 def preprocess_text(text: str, language: str = "spanish") -> List[str]:
@@ -51,10 +57,12 @@ def preprocess_text(text: str, language: str = "spanish") -> List[str]:
         A list of processed tokens.
     """
     stop_words = set(stopwords.words(language))
-    lemmatizer = WordNetLemmatizer()
-    # Tokenize by simple splitting; for more complex languages, consider spaCy.
-    tokens = [word.lower() for word in text.split() if word.isalpha()]
-    filtered = [lemmatizer.lemmatize(w) for w in tokens if w not in stop_words]
+    doc = load_spanish_nlp()(text)
+    filtered = [
+        token.lemma_.lower()
+        for token in doc
+        if token.is_alpha and token.lemma_.lower() not in stop_words
+    ]
     return filtered
 
 
@@ -120,6 +128,17 @@ def display_sentiment_distribution(labels: List[str]):
     st.pyplot(fig)
 
 
+def display_average_length_by_class(df: pd.DataFrame):
+    """Display the average number of processed words by original class."""
+    avg_lengths = df.groupby("clase")["tokens"].apply(lambda rows: sum(len(row) for row in rows) / len(rows))
+    fig, ax = plt.subplots()
+    ax.bar(avg_lengths.index, avg_lengths.values, color="mediumseagreen")
+    ax.set_xlabel("Clase")
+    ax.set_ylabel("Promedio de palabras")
+    ax.set_title("Longitud promedio de opiniones por clase")
+    st.pyplot(fig)
+
+
 def main():
     st.title("Análisis de Opiniones de Clientes")
     st.write("""
@@ -158,6 +177,8 @@ def main():
         ax.pie(class_counts.values, labels=class_counts.index, autopct="%1.1f%%")
         ax.set_title("Distribución de opiniones originales")
         st.pyplot(fig)
+        st.subheader("Longitud promedio de opiniones por clase")
+        display_average_length_by_class(df)
         # Filter by class
         unique_classes = df["clase"].unique().tolist()
         selected_class = st.selectbox("Filtrar opiniones por clase", ["Todas"] + unique_classes)
