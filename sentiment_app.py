@@ -33,20 +33,11 @@ from typing import List, Tuple
 import matplotlib.pyplot as plt
 import nltk
 import pandas as pd
-import spacy
 import streamlit as st
 from nltk.corpus import stopwords
+from nltk.stem import SnowballStemmer
 from transformers import pipeline
 from wordcloud import WordCloud
-
-
-@st.cache_resource
-def load_spanish_nlp():
-    """Load Spanish NLP tools used for tokenization and lemmatization."""
-    try:
-        return spacy.load("es_core_news_sm", disable=["parser", "ner"])
-    except OSError:
-        return spacy.blank("es")
 
 
 def preprocess_text(text: str, language: str = "spanish") -> List[str]:
@@ -60,13 +51,9 @@ def preprocess_text(text: str, language: str = "spanish") -> List[str]:
         A list of processed tokens.
     """
     stop_words = set(stopwords.words(language))
-    doc = load_spanish_nlp()(text)
-    filtered = []
-    for token in doc:
-        lemma = token.lemma_.lower() if token.lemma_ else token.text.lower()
-        if token.is_alpha and lemma not in stop_words:
-            filtered.append(lemma)
-    return filtered
+    stemmer = SnowballStemmer(language)
+    tokens = [word.lower() for word in text.split() if word.isalpha()]
+    return [stemmer.stem(word) for word in tokens if word not in stop_words]
 
 
 def generate_wordcloud(tokens: List[str]) -> WordCloud:
