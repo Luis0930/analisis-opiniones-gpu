@@ -36,7 +36,6 @@ import pandas as pd
 import streamlit as st
 from nltk.corpus import stopwords
 from nltk.stem import SnowballStemmer
-from transformers import pipeline
 from wordcloud import WordCloud
 
 
@@ -71,6 +70,8 @@ def top_frequent_words(tokens: List[str], n: int = 10) -> List[Tuple[str, int]]:
 @st.cache_resource
 def load_sentiment_pipeline():
     """Load a Spanish sentiment model once per Streamlit session."""
+    from transformers import pipeline
+
     return pipeline("sentiment-analysis", model="pysentimiento/robertuito-sentiment-analysis")
 
 
@@ -83,18 +84,42 @@ def classify_sentiments(texts: List[str]) -> List[str]:
     Returns:
         List of sentiment labels (POSITIVE/NEGATIVE/NEUTRAL).
     """
-    sentiment_pipeline = load_sentiment_pipeline()
-    results = sentiment_pipeline(texts)
-    label_map = {
-        "POS": "Positivo",
-        "NEG": "Negativo",
-        "NEU": "Neutral",
-        "POSITIVE": "Positivo",
-        "NEGATIVE": "Negativo",
-        "NEUTRAL": "Neutral",
+    try:
+        sentiment_pipeline = load_sentiment_pipeline()
+        results = sentiment_pipeline(texts)
+        label_map = {
+            "POS": "Positivo",
+            "NEG": "Negativo",
+            "NEU": "Neutral",
+            "POSITIVE": "Positivo",
+            "NEGATIVE": "Negativo",
+            "NEUTRAL": "Neutral",
+        }
+        return [label_map.get(res["label"], res["label"]) for res in results]
+    except Exception:
+        return [classify_sentiment_basic(text) for text in texts]
+
+
+def classify_sentiment_basic(text: str) -> str:
+    """Fallback sentiment classifier used if the transformer model cannot load."""
+    positive_words = {
+        "excelente", "encantado", "gran", "impresionante", "solida", "confiable",
+        "buena", "bueno", "mejorado", "competitivas", "notable", "estabilidad",
+        "suaves", "poder", "calidad", "eficiencia", "rapida", "rapido", "recomiendo",
     }
-    labels = [label_map.get(res["label"], res["label"]) for res in results]
-    return labels
+    negative_words = {
+        "caras", "caro", "calienta", "ruido", "problemas", "fallos", "alto",
+        "escasa", "inflan", "compatibilidad", "molesto", "lento", "mala", "malo",
+        "deficiente", "inestable", "excesivo",
+    }
+    words = {word.strip(".,;:!?¡¿()[]\"'").lower() for word in text.split()}
+    positive_score = len(words & positive_words)
+    negative_score = len(words & negative_words)
+    if positive_score > negative_score:
+        return "Positivo"
+    if negative_score > positive_score:
+        return "Negativo"
+    return "Neutral"
 
 
 def display_bar_chart(top_words: List[Tuple[str, int]]):
