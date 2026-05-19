@@ -6,12 +6,12 @@ corresponding class labels (e.g., positive/negative or star ratings). The app
 performs text preprocessing (stopword removal and lemmatization), generates a
 word cloud, displays the top 10 most frequent words in a bar chart, and
 includes an additional chart showing sentiment distribution based on a
-pretrained language model. Users can filter analyses by the original class
+ChatGPT language model. Users can filter analyses by the original class
 labels and can also enter new comments to receive a sentiment prediction.
 
 To run the app locally:
 
-    pip install streamlit pandas matplotlib wordcloud nltk transformers
+    pip install streamlit pandas matplotlib wordcloud nltk openai
 
 Then execute:
 
@@ -25,8 +25,7 @@ Make sure to download the NLTK stopwords and WordNet data before the first run:
 
 """
 
-import io
-import os
+import json
 from collections import Counter
 from typing import List, Tuple
 
@@ -36,7 +35,11 @@ import pandas as pd
 import streamlit as st
 from nltk.corpus import stopwords
 from nltk.stem import SnowballStemmer
+from openai import OpenAI
 from wordcloud import WordCloud
+
+
+OPENAI_MODEL = "gpt-4o-mini"
 
 
 def preprocess_text(text: str, language: str = "spanish") -> List[str]:
@@ -67,37 +70,53 @@ def top_frequent_words(tokens: List[str], n: int = 10) -> List[Tuple[str, int]]:
     return counter.most_common(n)
 
 
-@st.cache_resource
-def load_sentiment_pipeline():
-    """Load a Spanish sentiment model once per Streamlit session."""
-    from transformers import pipeline
-
-    return pipeline("sentiment-analysis", model="pysentimiento/robertuito-sentiment-analysis")
-
-
 def classify_sentiments(texts: List[str]) -> List[str]:
-    """Classify sentiments using a pretrained sentiment-analysis pipeline.
+    """Classify sentiments using ChatGPT through the OpenAI API.
 
     Args:
         texts: List of input texts.
 
     Returns:
-        List of sentiment labels (POSITIVE/NEGATIVE/NEUTRAL).
+        List of sentiment labels (Positivo/Negativo/Neutral).
     """
     try:
-        sentiment_pipeline = load_sentiment_pipeline()
-        results = sentiment_pipeline(texts)
-        label_map = {
-            "POS": "Positivo",
-            "NEG": "Negativo",
-            "NEU": "Neutral",
-            "POSITIVE": "Positivo",
-            "NEGATIVE": "Negativo",
-            "NEUTRAL": "Neutral",
-        }
-        return [label_map.get(res["label"], res["label"]) for res in results]
+        return classify_sentiments_openai(texts)
     except Exception:
         return [classify_sentiment_basic(text) for text in texts]
+
+
+def get_openai_client() -> OpenAI:
+    """Create an OpenAI client from Streamlit Secrets."""
+    api_key = st.secrets.get("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("Falta configurar OPENAI_API_KEY en Streamlit Secrets.")
+    return OpenAI(api_key=api_key)
+
+
+def classify_sentiments_openai(texts: List[str]) -> List[str]:
+    """Classify a batch of comments with ChatGPT and return Spanish labels."""
+    client = get_openai_client()
+    prompt = {
+        "tarea": "Clasifica el sentimiento de cada opinion.",
+        "instrucciones": (
+            "Responde unicamente un JSON valido con la clave 'sentimientos'. "
+            "Cada elemento debe ser exactamente 'Positivo', 'Negativo' o 'Neutral'. "
+            "Conserva el mismo orden de las opiniones."
+        ),
+        "opiniones": texts,
+    }
+    response = client.responses.create(
+        model=OPENAI_MODEL,
+        instructions="Eres un clasificador de sentimientos en español.",
+        input=json.dumps(prompt, ensure_ascii=False),
+        temperature=0,
+    )
+    data = json.loads(response.output_text)
+    labels = data.get("sentimientos", [])
+    if len(labels) != len(texts):
+        raise ValueError("La respuesta de OpenAI no coincide con la cantidad de opiniones.")
+    valid_labels = {"Positivo", "Negativo", "Neutral"}
+    return [label if label in valid_labels else "Neutral" for label in labels]
 
 
 def classify_sentiment_basic(text: str) -> str:
@@ -203,7 +222,7 @@ def main():
             df_filtered = df
         # Classification using LLM
         st.subheader("Clasificación de sentimientos utilizando modelo de lenguaje")
-        st.caption("Modelo usado: pysentimiento/robertuito-sentiment-analysis, entrenado para sentimiento en español.")
+        st.caption("Modelo usado: ChatGPT mediante la API de OpenAI.")
         # To avoid long runtime, process only first 100 comments; in this case we have 30
         labels = classify_sentiments(df_filtered["opinion"].tolist())
         df_filtered = df_filtered.copy()
