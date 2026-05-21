@@ -3,4 +3,5 @@ pandas
 matplotlib
 wordcloud
 nltk
-openai
+transformers
+torch

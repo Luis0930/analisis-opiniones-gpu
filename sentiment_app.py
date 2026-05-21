@@ -6,12 +6,12 @@ corresponding class labels (e.g., positive/negative or star ratings). The app
 performs text preprocessing (stopword removal and lemmatization), generates a
 word cloud, displays the top 10 most frequent words in a bar chart, and
 includes an additional chart showing sentiment distribution based on a
-ChatGPT language model. Users can filter analyses by the original class
+pretrained language model. Users can filter analyses by the original class
 labels and can also enter new comments to receive a sentiment prediction.
 
 To run the app locally:
 
-    pip install streamlit pandas matplotlib wordcloud nltk openai
+    pip install streamlit pandas matplotlib wordcloud nltk transformers torch
 
 Then execute:
 
@@ -25,7 +25,6 @@ Make sure to download the NLTK stopwords and WordNet data before the first run:
 
 """
 
-import json
 from collections import Counter
 from typing import List, Tuple
 
@@ -35,11 +34,11 @@ import pandas as pd
 import streamlit as st
 from nltk.corpus import stopwords
 from nltk.stem import SnowballStemmer
-from openai import OpenAI
+from transformers import pipeline
 from wordcloud import WordCloud
 
 
-OPENAI_MODEL = "gpt-4o-mini"
+SENTIMENT_MODEL = "pysentimiento/robertuito-sentiment-analysis"
 
 
 def preprocess_text(text: str, language: str = "spanish") -> List[str]:
@@ -71,7 +70,7 @@ def top_frequent_words(tokens: List[str], n: int = 10) -> List[Tuple[str, int]]:
 
 
 def classify_sentiments(texts: List[str]) -> List[str]:
-    """Classify sentiments using ChatGPT through the OpenAI API.
+    """Classify sentiments using a Spanish sentiment model from Hugging Face.
 
     Args:
         texts: List of input texts.
@@ -79,41 +78,23 @@ def classify_sentiments(texts: List[str]) -> List[str]:
     Returns:
         List of sentiment labels (Positivo/Negativo/Neutral).
     """
-    return classify_sentiments_openai(texts)
-
-
-def get_openai_client() -> OpenAI:
-    """Create an OpenAI client from Streamlit Secrets."""
-    api_key = st.secrets.get("OPENAI_API_KEY")
-    if not api_key:
-        raise ValueError("Falta configurar OPENAI_API_KEY en Streamlit Secrets.")
-    return OpenAI(api_key=api_key)
-
-
-def classify_sentiments_openai(texts: List[str]) -> List[str]:
-    """Classify a batch of comments with ChatGPT and return Spanish labels."""
-    client = get_openai_client()
-    prompt = {
-        "tarea": "Clasifica el sentimiento de cada opinion.",
-        "instrucciones": (
-            "Responde unicamente un JSON valido con la clave 'sentimientos'. "
-            "Cada elemento debe ser exactamente 'Positivo', 'Negativo' o 'Neutral'. "
-            "Conserva el mismo orden de las opiniones."
-        ),
-        "opiniones": texts,
+    sentiment_pipeline = load_sentiment_pipeline()
+    results = sentiment_pipeline(texts)
+    label_map = {
+        "POS": "Positivo",
+        "NEG": "Negativo",
+        "NEU": "Neutral",
+        "POSITIVE": "Positivo",
+        "NEGATIVE": "Negativo",
+        "NEUTRAL": "Neutral",
     }
-    response = client.responses.create(
-        model=OPENAI_MODEL,
-        instructions="Eres un clasificador de sentimientos en español.",
-        input=json.dumps(prompt, ensure_ascii=False),
-        temperature=0,
-    )
-    data = json.loads(response.output_text)
-    labels = data.get("sentimientos", [])
-    if len(labels) != len(texts):
-        raise ValueError("La respuesta de OpenAI no coincide con la cantidad de opiniones.")
-    valid_labels = {"Positivo", "Negativo", "Neutral"}
-    return [label if label in valid_labels else "Neutral" for label in labels]
+    return [label_map.get(result["label"], result["label"]) for result in results]
+
+
+@st.cache_resource
+def load_sentiment_pipeline():
+    """Load the Hugging Face sentiment model once per Streamlit session."""
+    return pipeline("sentiment-analysis", model=SENTIMENT_MODEL)
 
 
 def display_bar_chart(top_words: List[Tuple[str, int]]):
@@ -149,9 +130,9 @@ def display_average_length_by_class(df: pd.DataFrame):
 
 
 def display_new_comment_classifier():
-    """Display an interactive GPT sentiment classifier for a new comment."""
+    """Display an interactive sentiment classifier for a new comment."""
     st.subheader("Clasificar un nuevo comentario")
-    st.caption("Escribe un comentario y presiona Enter o el botón para clasificarlo con GPT.")
+    st.caption("Escribe un comentario y presiona Enter o el botón para clasificarlo.")
     with st.form("new_comment_form"):
         new_comment = st.text_input("Comentario nuevo")
         submitted = st.form_submit_button("Clasificar comentario")
@@ -162,17 +143,16 @@ def display_new_comment_classifier():
             return
         try:
             new_label = classify_sentiments([new_comment])[0]
-            st.success(f"Sentimiento detectado por GPT: {new_label}")
+            st.success(f"Sentimiento detectado: {new_label}")
             st.dataframe(
                 pd.DataFrame(
-                    [{"comentario": new_comment, "sentimiento_gpt": new_label}]
+                    [{"comentario": new_comment, "sentimiento_modelo": new_label}]
                 ),
                 use_container_width=True,
             )
         except Exception as exc:
             st.error(
-                "No se pudo clasificar con GPT. Revisa que OPENAI_API_KEY este configurada "
-                "en Streamlit Secrets y que la cuenta tenga creditos disponibles."
+                "No se pudo clasificar el comentario. Intenta nuevamente o revisa los logs de Streamlit."
             )
             st.caption(f"Detalle tecnico: {exc}")
 
@@ -223,14 +203,13 @@ def main():
             df_filtered = df
         # Classification using LLM
         st.subheader("Clasificación de sentimientos utilizando modelo de lenguaje")
-        st.caption(f"Modelo usado: GPT mediante la API de OpenAI ({OPENAI_MODEL}).")
+        st.caption(f"Modelo usado: {SENTIMENT_MODEL}.")
         # To avoid long runtime, process only first 100 comments; in this case we have 30
         try:
             labels = classify_sentiments(df_filtered["opinion"].tolist())
         except Exception as exc:
             st.error(
-                "No se pudo clasificar con GPT. Revisa que OPENAI_API_KEY este configurada "
-                "en Streamlit Secrets y que la cuenta tenga creditos disponibles."
+                "No se pudo clasificar con el modelo de sentimiento. Intenta nuevamente o revisa los logs de Streamlit."
             )
             st.caption(f"Detalle tecnico: {exc}")
             return
