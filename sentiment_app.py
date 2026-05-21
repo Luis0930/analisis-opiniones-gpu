@@ -79,10 +79,7 @@ def classify_sentiments(texts: List[str]) -> List[str]:
     Returns:
         List of sentiment labels (Positivo/Negativo/Neutral).
     """
-    try:
-        return classify_sentiments_openai(texts)
-    except Exception:
-        return [classify_sentiment_basic(text) for text in texts]
+    return classify_sentiments_openai(texts)
 
 
 def get_openai_client() -> OpenAI:
@@ -119,28 +116,6 @@ def classify_sentiments_openai(texts: List[str]) -> List[str]:
     return [label if label in valid_labels else "Neutral" for label in labels]
 
 
-def classify_sentiment_basic(text: str) -> str:
-    """Fallback sentiment classifier used if the transformer model cannot load."""
-    positive_words = {
-        "excelente", "encantado", "gran", "impresionante", "solida", "confiable",
-        "buena", "bueno", "mejorado", "competitivas", "notable", "estabilidad",
-        "suaves", "poder", "calidad", "eficiencia", "rapida", "rapido", "recomiendo",
-    }
-    negative_words = {
-        "caras", "caro", "calienta", "ruido", "problemas", "fallos", "alto",
-        "escasa", "inflan", "compatibilidad", "molesto", "lento", "mala", "malo",
-        "deficiente", "inestable", "excesivo",
-    }
-    words = {word.strip(".,;:!?¡¿()[]\"'").lower() for word in text.split()}
-    positive_score = len(words & positive_words)
-    negative_score = len(words & negative_words)
-    if positive_score > negative_score:
-        return "Positivo"
-    if negative_score > positive_score:
-        return "Negativo"
-    return "Neutral"
-
-
 def display_bar_chart(top_words: List[Tuple[str, int]]):
     """Display a bar chart of top words using matplotlib."""
     words, counts = zip(*top_words)
@@ -173,6 +148,35 @@ def display_average_length_by_class(df: pd.DataFrame):
     st.pyplot(fig)
 
 
+def display_new_comment_classifier():
+    """Display an interactive GPT sentiment classifier for a new comment."""
+    st.subheader("Clasificar un nuevo comentario")
+    st.caption("Escribe un comentario y presiona Enter o el botón para clasificarlo con GPT.")
+    with st.form("new_comment_form"):
+        new_comment = st.text_input("Comentario nuevo")
+        submitted = st.form_submit_button("Clasificar comentario")
+
+    if submitted:
+        if not new_comment.strip():
+            st.warning("Escribe un comentario antes de clasificar.")
+            return
+        try:
+            new_label = classify_sentiments([new_comment])[0]
+            st.success(f"Sentimiento detectado por GPT: {new_label}")
+            st.dataframe(
+                pd.DataFrame(
+                    [{"comentario": new_comment, "sentimiento_gpt": new_label}]
+                ),
+                use_container_width=True,
+            )
+        except Exception as exc:
+            st.error(
+                "No se pudo clasificar con GPT. Revisa que OPENAI_API_KEY este configurada "
+                "en Streamlit Secrets y que la cuenta tenga creditos disponibles."
+            )
+            st.caption(f"Detalle tecnico: {exc}")
+
+
 def main():
     st.title("Análisis de Opiniones de Clientes")
     st.write("""
@@ -183,9 +187,6 @@ def main():
 
     # File uploader
     uploaded_file = st.file_uploader("Subir archivo CSV", type=["csv"])
-
-    # Text input for new comment
-    new_comment = st.text_input("Añadir un nuevo comentario para evaluar su sentimiento:")
 
     if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
@@ -222,19 +223,25 @@ def main():
             df_filtered = df
         # Classification using LLM
         st.subheader("Clasificación de sentimientos utilizando modelo de lenguaje")
-        st.caption("Modelo usado: ChatGPT mediante la API de OpenAI.")
+        st.caption(f"Modelo usado: GPT mediante la API de OpenAI ({OPENAI_MODEL}).")
         # To avoid long runtime, process only first 100 comments; in this case we have 30
-        labels = classify_sentiments(df_filtered["opinion"].tolist())
+        try:
+            labels = classify_sentiments(df_filtered["opinion"].tolist())
+        except Exception as exc:
+            st.error(
+                "No se pudo clasificar con GPT. Revisa que OPENAI_API_KEY este configurada "
+                "en Streamlit Secrets y que la cuenta tenga creditos disponibles."
+            )
+            st.caption(f"Detalle tecnico: {exc}")
+            return
         df_filtered = df_filtered.copy()
         df_filtered["sentimiento_modelo"] = labels
         st.dataframe(df_filtered[["opinion", "clase", "sentimiento_modelo"]])
         display_sentiment_distribution(labels)
-        # Evaluate new comment
-        if new_comment:
-            new_label = classify_sentiments([new_comment])[0]
-            st.write(f"El comentario se clasifica como: **{new_label}**")
     else:
         st.info("Suba un archivo CSV para comenzar el análisis.")
+
+    display_new_comment_classifier()
 
 
 if __name__ == "__main__":
